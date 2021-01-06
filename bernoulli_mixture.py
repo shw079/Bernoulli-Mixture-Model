@@ -21,10 +21,11 @@ class BernoulliMixture:
         The convergence threshold for log likelihood in EM.
     max_iter : int, defaults to 100
         Maximum number of iterations in EM.
-    smoothing : array_like, defaults to (1e-4, 1e-6)
-        Apply symmetric Beta prior over p and symmetric Dirichlet
-        prior over pi to avoid probabilities of exactly 0 or 1.
-        No smoothing if set to (0, 0).
+    smoothing : array_like, defaults to (1, 0)
+        Add psuedo-counts in estimation of Bernoulli parameters p and 
+        mixing coefficients pi. This is equivalent to apply Beta prior 
+        over p and symmetric Dirichlet prior over pi. No smoothing if
+        set to (0, 0).
     random_state : int, defaults to None
         Set seed if specified.
 
@@ -50,7 +51,7 @@ class BernoulliMixture:
         Data used to fit Bernoulli mixture model.
     """
     def __init__(self, n_components, tol=1e-6, max_iter=100,
-                 smoothing=(1e-4, 1e-6), random_state=None):
+                 smoothing=(1, 0), random_state=None):
         self.n_components = n_components
         self.tol = tol
         self.max_iter = max_iter
