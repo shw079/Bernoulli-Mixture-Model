@@ -79,9 +79,8 @@ class BernoulliMixture:
         # log P(x|z) per example
         self._log_X_cond_Z = np.empty((self.X.shape[0], self.n_components))
 
-        rand_num = np.random.rand(self.n_components)
-        self.pi_ = rand_num / rand_num.sum()
-        self.p_ = np.random.rand(self.n_components, self.X.shape[1])
+        self.pi_ = np.ones(self.n_components) / self.n_components
+        self.p_ = np.random.uniform(0.2, 0.8, (self.n_components, self.X.shape[1]))
 
     def _e_step(self):
         """E step"""
