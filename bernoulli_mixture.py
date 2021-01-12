@@ -17,15 +17,22 @@ class BernoulliMixture:
     ----------
     n_components : int
         The number of mixture components.
-    tol : float, defaults to 1e-6
+    tol : float, defaults to 1e-3
         The convergence threshold for log likelihood in EM.
     max_iter : int, defaults to 100
         Maximum number of iterations in EM.
-    smoothing : array_like, defaults to (1, 0)
+    smoothing : array_like, defaults to (0.1, 0.1)
         Add psuedo-counts in estimation of Bernoulli parameters p and 
         mixing coefficients pi. This is equivalent to apply Beta prior 
-        over p and symmetric Dirichlet prior over pi. No smoothing if
+        over p and symmetric Dirichlet prior over pi and solve for
+        maximum a posteriori estimates. No smoothing if
         set to (0, 0).
+    init_params : {"random", "kmeans"}, default to "random"
+        The method used to initialize mixing coefficients and
+        Bernoulli parameters.
+    n_init : int, defaults to 1
+        Number of initializations for Bernoulli mixture
+        model parameters. Only best model is kept.
     random_state : int, defaults to None
         Set seed if specified.
 
@@ -50,14 +57,17 @@ class BernoulliMixture:
     X : numpy array, shape (n_samples, n_features)
         Data used to fit Bernoulli mixture model.
     """
-    def __init__(self, n_components, tol=1e-6, max_iter=100,
-                 smoothing=(1, 0), random_state=None):
+    def __init__(self, n_components, tol=1e-3, max_iter=100,
+                 smoothing=(0.1, 0.1), init_params="random",
+                 n_init=1, random_state=None):
         self.n_components = n_components
         self.tol = tol
         self.max_iter = max_iter
         assert np.all(np.array(smoothing) >= 0), \
             "Smoothing must be non-negative."
         self.smoothing = smoothing
+        self.init_params = init_params
+        self.n_init = n_init
         self.random_state = random_state
 
         self.pi_ = None
@@ -80,7 +90,13 @@ class BernoulliMixture:
         self._log_X_cond_Z = np.empty((self.X.shape[0], self.n_components))
 
         self.pi_ = np.ones(self.n_components) / self.n_components
-        self.p_ = np.random.uniform(0.2, 0.8, (self.n_components, self.X.shape[1]))
+        self.p_ = np.random.rand(self.n_components, self.X.shape[1])
+        if self.init_params == "kmeans":
+            kmeans = KMeans(n_clusters=self.n_components)
+            kmeans.fit(self.X)
+            self._resp = np.zeros((self.X.shape[0], self.n_components))
+            self._resp[np.arange(self.X.shape[0]), kmeans.labels_] = 1
+            self._m_step()
 
     def _e_step(self):
         """E step"""
@@ -137,6 +153,7 @@ class BernoulliMixture:
         X : numpy array, shape (n_samples, n_features)
             Data used fit Bernoulli mixture model. Each row
             represents an observation.
+
         Returns
         -------
         self
@@ -149,23 +166,40 @@ class BernoulliMixture:
         if self.random_state:
             np.random.seed(self.random_state)
 
-        self._initialize()
-        self._n_parameters()
+        # multiple initializations
+        best_log_l = -np.Inf
+        for _ in range(self.n_init):
+            self._initialize()
+            self._n_parameters()
 
-        for n_iter in range(self.max_iter):
-            log_l = self._e_step()
+            for n_iter in range(self.max_iter):
+                log_l = self._e_step()
 
-            if log_l - self._log_l > self.tol:
-                self._log_l = log_l
-                self._m_step()
+                if log_l - self._log_l > self.tol:
+                    self._log_l = log_l
+                    self._m_step()
+                else:
+                    self._log_l = log_l
+                    self.converged_ = True
+                    break
             else:
-                self._log_l = log_l
-                self.converged_ = True
-                break
-        else:
-            warnings.warn("Solution not converged within tolerance. " \
-                          "Try to use larger max_iter.")
-        self.n_iter_ = n_iter + 1
+                self.converged_ = False
+                warnings.warn("Solution not converged within tolerance. " \
+                              "Try to use larger max_iter.")
+            self.n_iter_ = n_iter + 1
+
+            if self._log_l > best_log_l:
+                best_log_l = self._log_l
+                best_params = (self.pi_, self.p_)
+                best_intermediate = (self._log_X_cond_Z, self._resp)
+                best_state = (self.converged_, self.n_iter_)
+
+        # keep the best model
+        self._log_l = best_log_l
+        self._log_l_per_sample = best_log_l / self.X.shape[0]
+        self.pi_, self.p_ = best_params
+        self._log_X_cond_Z, self._resp = best_intermediate
+        self.converged_, self.n_iter_ = best_state
 
         # calculate AIC, BIC
         self.aic_ = 2 * self.n_params_ - 2 * self._log_l
@@ -181,6 +215,7 @@ class BernoulliMixture:
         X : numpy array, shape (n_samples, n_features)
             Data to predict latent class labels. Each row
             represents an observation.
+
         Returns
         -------
         y : numpy array, shape (n_samples,)
@@ -197,6 +232,7 @@ class BernoulliMixture:
         X : numpy array, shape (n_samples, n_features)
             Data to predict latent class labels. Each row
             represents an observation.
+
         Returns
         -------
         log_l : numpy array, shape (n_samples,)
@@ -230,6 +266,7 @@ class BernoulliMixture:
             Set seed when generating samples.
         component : int, defaults to None
             Component used to generate samples.
+
         Returns
         -------
         X : numpy array, shape (n, n_features)
